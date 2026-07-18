@@ -416,8 +416,46 @@ function renderToday(){
    ============================================================ */
 function renderHistory(){
   const v=document.getElementById('view'); v.innerHTML='';
-  // progress chart
+
+  /* -------- session list, one card per DATE, newest first -------- */
+  const byDate={};
+  state.logs.forEach(l=>{(byDate[l.date]=byDate[l.date]||[]).push(l)});
+  const dates=Object.keys(byDate).sort().reverse();
+  if(!dates.length){
+    v.insertAdjacentHTML('beforeend','<div class="empty">No sessions logged yet. Go lift!</div>');
+  }
+  const fmtTime = ts => { const d=new Date(ts);
+    return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
+  dates.forEach((d,di)=>{
+    const logs=byDate[d];
+    const el=document.createElement('div');el.className='day-log';
+    const jsDay=new Date(d+'T12:00').getDay();
+    const sessionDay = logs[0].day!==undefined ? logs[0].day : jsDay;
+    const title = PROGRAM[sessionDay] ? PROGRAM[sessionDay].title.split('—')[0].trim() : '';
+    el.innerHTML=`<button>${d} · ${DAYNAMES[jsDay]}${title?' · '+title:''}<span class="cnt">${logs.length} sets ›</span></button><div class="detail"></div>`;
+    const det=el.querySelector('.detail');
+    // exercises in the order they were performed that day (by first logged set)
+    const order=[]; const byEx={};
+    logs.slice().sort((a,b)=>a.ts-b.ts).forEach(l=>{
+      if(!byEx[l.exerciseName]){byEx[l.exerciseName]=[];order.push(l.exerciseName);}
+      byEx[l.exerciseName].push(l);
+    });
+    order.forEach(name=>{
+      const ls=byEx[name].sort((a,b)=>a.setIndex-b.setIndex);
+      const line=ls.map(l=>{
+        const val=l.weight>0?`${l.weight}kg×${l.reps}`:(l.reps>0?`×${l.reps}`:'✓');
+        return `${val} <span style="opacity:.55">(${fmtTime(l.ts)})</span>`;
+      }).join(' · ');
+      det.insertAdjacentHTML('beforeend',`<h4>${name}</h4><div>${line}</div>`);
+    });
+    el.querySelector('button').onclick=()=>el.classList.toggle('open');
+    if(di===0)el.classList.add('open');   // most recent session opens by default
+    v.appendChild(el);
+  });
+
+  /* -------- progress chart (per exercise) below the list -------- */
   const box=document.createElement('div'); box.className='chartbox';
+  box.insertAdjacentHTML('beforeend','<div class="ex-name" style="margin-bottom:8px">Progress by exercise</div>');
   const sel=document.createElement('select');
   const exList=[]; Object.values(PROGRAM).forEach(d=>d.ex.forEach(e=>{if(e.type!=='cardio')exList.push(e)}));
   exList.forEach(e=>{const o=document.createElement('option');o.value=e.id;o.textContent=e.name;sel.appendChild(o)});
@@ -425,40 +463,20 @@ function renderHistory(){
   box.append(sel,svgWrap); v.appendChild(box);
   function drawChart(){
     const pts={}; logsFor(sel.value).forEach(l=>{pts[l.date]=Math.max(pts[l.date]||0,l.weight)});
-    const dates=Object.keys(pts).sort();
-    if(dates.length<2){svgWrap.innerHTML='<div class="empty">Log this exercise on two different days to see progress.</div>';return;}
-    const vals=dates.map(d=>pts[d]);
+    const cdates=Object.keys(pts).sort();
+    if(cdates.length<2){svgWrap.innerHTML='<div class="empty">Log this exercise on two different days to see progress.</div>';return;}
+    const vals=cdates.map(d=>pts[d]);
     const min=Math.min(...vals), max=Math.max(...vals), pad=(max-min)||1;
     const W=320,H=110;
-    const xy=(i)=>[10+i*(W-20)/(dates.length-1), H-15-((vals[i]-min)/pad)*(H-35)];
+    const xy=(i)=>[10+i*(W-20)/(cdates.length-1), H-15-((vals[i]-min)/pad)*(H-35)];
     let path=vals.map((_,i)=>{const[x,y]=xy(i);return(i?'L':'M')+x+' '+y}).join(' ');
     let dots=vals.map((_,i)=>{const[x,y]=xy(i);return`<circle cx="${x}" cy="${y}" r="3.5" fill="var(--accent)"/>`}).join('');
     svgWrap.innerHTML=`<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
       <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/>${dots}
       <text x="10" y="12" fill="var(--muted)" font-size="10">${max} kg</text>
-      <text x="10" y="${H-2}" fill="var(--muted)" font-size="10">${dates[0]} → ${dates[dates.length-1]}</text></svg>`;
+      <text x="10" y="${H-2}" fill="var(--muted)" font-size="10">${cdates[0]} → ${cdates[cdates.length-1]}</text></svg>`;
   }
   sel.onchange=drawChart; drawChart();
-
-  // session list
-  const byDate={};
-  state.logs.forEach(l=>{(byDate[l.date]=byDate[l.date]||[]).push(l)});
-  const dates=Object.keys(byDate).sort().reverse();
-  if(!dates.length){v.insertAdjacentHTML('beforeend','<div class="empty">No sessions logged yet. Go lift!</div>');return;}
-  dates.forEach(d=>{
-    const logs=byDate[d];
-    const el=document.createElement('div');el.className='day-log';
-    const dayName=DAYNAMES[new Date(d+'T12:00').getDay()];
-    el.innerHTML=`<button>${d} · ${dayName}<span class="cnt">${logs.length} sets ›</span></button><div class="detail"></div>`;
-    const det=el.querySelector('.detail');
-    const byEx={};logs.forEach(l=>{(byEx[l.exerciseName]=byEx[l.exerciseName]||[]).push(l)});
-    Object.entries(byEx).forEach(([name,ls])=>{
-      ls.sort((a,b)=>a.setIndex-b.setIndex);
-      det.insertAdjacentHTML('beforeend',`<h4>${name}</h4><div>${ls.map(l=>l.weight>0?`${l.weight}kg×${l.reps}`:(l.reps>0?`×${l.reps}`:'✓')).join(' · ')}</div>`);
-    });
-    el.querySelector('button').onclick=()=>el.classList.toggle('open');
-    v.appendChild(el);
-  });
 }
 
 /* ============================================================
